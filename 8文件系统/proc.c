@@ -31,10 +31,10 @@ int get_psinfo(char* buf) {
 int get_hdinfo(char* buf) {
 	//return sprintf(buf, "get_hdinfo todo\n");
 	struct super_block * sb;
-	sb = get_super(0);
+	sb = get_super(current->root->i_dev);
 
 	char* pre = buf;
-	buf += sprintf(buf, "DEV_ROOT supper node:\n\n");
+	buf += sprintf(buf, "current dev %d supper node:\n\n", current->root->i_dev);
 	buf += sprintf(buf, "s_ninodes=%d\n", sb->s_ninodes);
 	buf += sprintf(buf, "s_nzones=%d\n", sb->s_nzones);
 	buf += sprintf(buf, "s_imap_blocks=%d\n", sb->s_imap_blocks);
@@ -46,8 +46,51 @@ int get_hdinfo(char* buf) {
 	return buf-pre;
 }
 
-int get_inodeinfo(char* buf) {
-	return sprintf(buf, "get_inodeinfo todo\n");
+void read_dir(struct m_inode* dir, char** buf) {
+	int entries;
+	int block,i;
+	struct buffer_head * bh;
+	struct dir_entry * de;
+
+	if (!(block = dir->i_zone[0]))
+		return ;
+	if (!(bh = bread(dir->i_dev,block)))
+		return ;
+	entries = dir->i_size / (sizeof (struct dir_entry));
+	*buf += sprintf(*buf, "total entries %d\n", entries);
+	i = 0;
+	de = (struct dir_entry *) bh->b_data;
+	while (i < entries) {
+		if ((char *)de >= BLOCK_SIZE+bh->b_data) {
+			brelse(bh);
+			bh = NULL;
+			if (!(block = bmap(dir,i/DIR_ENTRIES_PER_BLOCK)) ||
+			    !(bh = bread(dir->i_dev,block))) {
+				i += DIR_ENTRIES_PER_BLOCK;
+				continue;
+			}
+			de = (struct dir_entry *) bh->b_data;
+		}
+		*buf += sprintf(*buf, "%s\n", de->name);
+		de++;
+		i++;
+	}
+	brelse(bh);
+}
+
+int get_dirinfo(char* buf) {
+	char* pre = buf;
+	buf += sprintf(buf, "root dir info\n");
+	struct m_inode * inode;
+	if (!current->root || !current->root->i_count)
+		panic("No root inode");
+	if (!current->pwd || !current->pwd->i_count)
+		panic("No cwd inode");
+	inode = current->root;
+	inode->i_count++;
+	read_dir(inode, &buf);
+	iput(inode);
+	return buf-pre;
 }
 
 
@@ -65,7 +108,7 @@ int proc_read(int dev, unsigned long * pos, char * buf, int count)
 		info_len = get_hdinfo(info);
 		break;
 	case 2:
-		info_len = get_inodeinfo(info);
+		info_len = get_dirinfo(info);
 		break;
 	default:
 		break;
